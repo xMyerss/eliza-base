@@ -5,6 +5,7 @@ import {
   settings,
   stringToUuid,
   type Character,
+  Clients, // Importar el enum de clientes
 } from "@elizaos/core";
 import fs from "fs";
 import net from "net";
@@ -13,6 +14,7 @@ import { fileURLToPath } from "url";
 import { initializeDbCache } from "./cache/index.ts";
 import { character } from "./character.ts";
 import { startChat } from "./chat/index.ts";
+import { initializeClients } from "./clients/index.ts";
 import { getTokenForProvider, loadCharacters, parseArguments } from "./config/index.ts";
 import { initializeDatabase } from "./database/index.ts";
 
@@ -25,11 +27,7 @@ export function createAgent(
   cache: any,
   token: string
 ) {
-  elizaLogger.success(
-    elizaLogger.successesTitle,
-    "Creating runtime for character",
-    character.name
-  );
+  elizaLogger.success("Creating runtime for character", character.name);
 
   return new AgentRuntime({
     databaseAdapter: db,
@@ -66,17 +64,16 @@ async function startAgent(character: Character, directClient: DirectClient) {
 
     await runtime.initialize();
 
-    // Registrar el agente
+    // Inicializar clientes
+    runtime.clients = await initializeClients(character, runtime);
+
     directClient.registerAgent(runtime);
     console.log(`Agent registered successfully: ${runtime.agentId}`);
 
     elizaLogger.debug(`Started ${character.name} as ${runtime.agentId}`);
     return runtime;
   } catch (error) {
-    elizaLogger.error(
-      `Error starting agent for character ${character.name}:`,
-      error
-    );
+    elizaLogger.error(`Error starting agent for character ${character.name}:`, error);
     throw error;
   }
 }
@@ -86,29 +83,18 @@ const startAgents = async () => {
   let serverPort = parseInt(settings.SERVER_PORT || "3000");
   const args = parseArguments();
 
-  let charactersArg = args.characters || args.character;
+  const charactersArg = args.characters || args.character;
   let characters = [character];
 
   if (charactersArg) {
     characters = await loadCharacters(charactersArg);
   }
 
-  try {
-    for (const character of characters) {
-      await startAgent(character, directClient);
-    }
-  } catch (error) {
-    elizaLogger.error("Error starting agents:", error);
+  for (const character of characters) {
+    await startAgent(character, directClient);
   }
 
   directClient.start(serverPort);
-
-  const isDaemonProcess = process.env.DAEMON_PROCESS === "true";
-  if (!isDaemonProcess) {
-    elizaLogger.log("Chat started. Type 'exit' to quit.");
-    const chat = startChat(characters);
-    chat();
-  }
 };
 
 startAgents().catch((error) => {
